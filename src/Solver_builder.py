@@ -1,7 +1,12 @@
 import itertools as it
 from gurobipy import *
 from gurobipy import quicksum
+from pathlib import Path
 import time
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+EXPERIMENT_LOG_PATH = DATA_DIR / "实验记录case3.txt"
 
 
 class GRBModel(object):
@@ -22,6 +27,9 @@ class GRBModel(object):
 
         self.model = None
         self.Model_Obj = {}
+        self.base_num_vars = 0
+        self.base_num_constrs = 0
+        self.root_num_constrs = 0
 
         # 决策变量
         self.R = {}
@@ -178,6 +186,10 @@ class GRBModel(object):
         #         self.valid_cut_cur[cut_id].append(eval(self.valid_cut_pool[cut_id], locals()))
         # 初始化一个字典用于存储约束
         # 添加约束并存储到字典中
+        self.model.update()
+        self.base_num_vars = self.model.NumVars
+        self.base_num_constrs = self.model.NumConstrs
+        self.root_num_constrs = self.base_num_constrs
 
 
     def optimize_(self, trigger1,trigger2,trigger3,trigger4):
@@ -269,7 +281,8 @@ class GRBModel(object):
 
 
         # self.model.Params.Heuristics = 0  # 禁用所有启发式算法
-        file_path = "D:/桌面/实验记录case3.txt"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        file_path = EXPERIMENT_LOG_PATH
         #全局优化
         if trigger1 != [0,0,0] and trigger1 != []:
             if trigger1[0]==1:
@@ -441,6 +454,8 @@ class GRBModel(object):
                             constr_name = f'cut_2_{i}_{j}_{k}'
                             # 将约束添加到字典中
                             self.model.addConstr(expr <= self.generator.Late_Start_Limit[j], name=constr_name)
+            self.model.update()
+            self.root_num_constrs = self.model.NumConstrs
             self.model.Params.NodeLimit = 1
             self.model.Params.OutputFlag = 0
             self.model.optimize()

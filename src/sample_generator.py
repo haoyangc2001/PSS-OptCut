@@ -17,6 +17,9 @@ class TrainSetGenerator(object):
         self.model_condition = None
         self.model_opt_trigger = 0
         self.model_gap = 0
+        self.scale_phase = None
+        self.scale_stage = None
+        self.size_signature = None
 
         self.generator = None
         self.model = None
@@ -30,6 +33,9 @@ class TrainSetGenerator(object):
         self.xl_opt_trigger = []
         self.xl_random_seed = []
         self.xl_gap = []
+        self.xl_scale_phase = []
+        self.xl_scale_stage = []
+        self.xl_size_signature = []
 
         self.xl_customer_num = []
         self.xl_service_num = []
@@ -120,9 +126,13 @@ class TrainSetGenerator(object):
         self.xl_obj = []  # 函数目标值
 
         self.xl_runtime = []
+        self.xl_base_num_vars = []
+        self.xl_base_num_constrs = []
+        self.xl_root_num_constrs = []
 
     def update_paras(self, model_obj_coe, model_valid_cut_pool, model_opt_trigger,
-                     model_gap, generator):
+                     model_gap, generator, scale_phase=None, scale_stage=None,
+                     size_signature=None):
         """
         导入更新的模型参数
         :param model_obj_coe: ，目标函数的系数
@@ -136,6 +146,9 @@ class TrainSetGenerator(object):
         self.model_valid_cut_pool = model_valid_cut_pool
         self.model_opt_trigger = model_opt_trigger
         self.model_gap = model_gap
+        self.scale_phase = scale_phase
+        self.scale_stage = scale_stage
+        self.size_signature = size_signature
 
         self.generator = generator
 
@@ -272,11 +285,17 @@ class TrainSetGenerator(object):
                 "opt_trigger": self.model_opt_trigger,
                 'random_seed': self.generator.random_seed,
                 'gap': self.model_gap,
+                'scale_phase': self.scale_phase,
+                'scale_stage': self.scale_stage,
+                'size_signature': self.size_signature,
 
                 'customer_num': self.generator.Num_Customer,
                 'service_num': self.generator.Num_Service,
                 'product_num': self.generator.Num_Product,
                 'team_num': self.generator.Num_Team,
+                'base_num_vars': self.model.base_num_vars,
+                'base_num_constrs': self.model.base_num_constrs,
+                'root_num_constrs': self.model.root_num_constrs,
 
                 'service_time': self.generator.Service_Time,
                 'service_price': self.generator.Service_Price,
@@ -375,11 +394,17 @@ class TrainSetGenerator(object):
             self.xl_opt_trigger.append(data[i]["opt_trigger"])
             self.xl_random_seed.append(data[i]["random_seed"])
             self.xl_gap.append(data[i]["gap"])
+            self.xl_scale_phase.append(data[i]["scale_phase"])
+            self.xl_scale_stage.append(data[i]["scale_stage"])
+            self.xl_size_signature.append(data[i]["size_signature"])
 
             self.xl_customer_num.append(data[i]["customer_num"])
             self.xl_service_num.append(data[i]["service_num"])
             self.xl_product_num.append(data[i]["product_num"])
             self.xl_team_num.append(data[i]["team_num"])
+            self.xl_base_num_vars.append(data[i]["base_num_vars"])
+            self.xl_base_num_constrs.append(data[i]["base_num_constrs"])
+            self.xl_root_num_constrs.append(data[i]["root_num_constrs"])
 
             self.xl_service_time.append(data[i]["service_time"])
             self.xl_service_price.append(data[i]["service_price"])
@@ -473,11 +498,17 @@ class TrainSetGenerator(object):
             '求解选择': self.xl_opt_trigger,
             'random_seed': self.xl_random_seed,
             'gap': self.xl_gap,
+            'scale_phase': self.xl_scale_phase,
+            'scale_stage': self.xl_scale_stage,
+            'size_signature': self.xl_size_signature,
 
             '客户数': self.xl_customer_num,
-            '服务数': self.xl_service_num.append,
+            '服务数': self.xl_service_num,
             '产品数': self.xl_product_num,
             '服务团队数': self.xl_team_num,
+            'base_num_vars': self.xl_base_num_vars,
+            'base_num_constrs': self.xl_base_num_constrs,
+            'root_num_constrs': self.xl_root_num_constrs,
 
             '服务时间': self.xl_service_time,
             '服务价格': self.xl_service_price,

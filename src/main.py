@@ -1,11 +1,58 @@
 from Pamas_generator import Generator
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from Solver_builder import GRBModel
 from sample_generator import TrainSetGenerator
 from gurobipy import quicksum
 import datetime
 from openpyxl import load_workbook
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+RESULT_CSV_PATH = DATA_DIR / "result.csv"
+
+
+def sample_instance_size(times):
+    """
+    按实验阶段生成实例规模。
+    前 300 轮保持原始随机区间，后 100 轮进入递增压测段。
+    """
+    if times <= 300:
+        num_customer = np.random.randint(5, 10)
+        num_service = np.random.randint(3, 6)
+        num_team = np.random.randint(3, 8)
+        scale_phase = 'baseline_300'
+        scale_stage = 'S1'
+    elif times <= 325:
+        num_customer = np.random.randint(10, 13)
+        num_service = np.random.randint(5, 7)
+        num_team = np.random.randint(6, 9)
+        scale_phase = 'stress_100'
+        scale_stage = 'S2'
+    elif times <= 350:
+        num_customer = np.random.randint(12, 15)
+        num_service = np.random.randint(6, 8)
+        num_team = np.random.randint(7, 10)
+        scale_phase = 'stress_100'
+        scale_stage = 'S3'
+    elif times <= 375:
+        num_customer = np.random.randint(14, 17)
+        num_service = np.random.randint(7, 9)
+        num_team = np.random.randint(8, 11)
+        scale_phase = 'stress_100'
+        scale_stage = 'S4'
+    else:
+        num_customer = np.random.randint(16, 19)
+        num_service = np.random.randint(8, 11)
+        num_team = np.random.randint(9, 13)
+        scale_phase = 'stress_100'
+        scale_stage = 'S5'
+
+    num_product = num_service
+    size_signature = f'I{num_customer}_M{num_service}_N{num_product}_K{num_team}'
+
+    return num_customer, num_service, num_product, num_team, scale_phase, scale_stage, size_signature
 
 # 模型目标函数
 Obj_Coef = [1, -1, 1, 0]
@@ -61,6 +108,7 @@ ser_pro_coe_ub = 2
 duration = 12
 
 times = 1
+TOTAL_TIMES = 400
 
 # np.random.seed(333)
 choice = 1
@@ -69,14 +117,10 @@ choice = 1
 gen = Generator()
 
 # 生成样本
-while times <= 300:
+while times <= TOTAL_TIMES:
     xl_target_data = []
     if times >= 1:
-        Num_Customer = np.random.randint(5, 10)
-        Num_Service = np.random.randint(3, 6)
-        # Num_Product = np.random.randint(2, 6)
-        Num_Product = Num_Service
-        Num_Team = np.random.randint(3, 8)
+        Num_Customer, Num_Service, Num_Product, Num_Team, scale_phase, scale_stage, size_signature = sample_instance_size(times)
 
         random_seed = np.random.randint(low=10, high=10000)
 
@@ -142,7 +186,9 @@ while times <= 300:
     ml_train_set_gen = TrainSetGenerator()
     # input params
     ml_train_set_gen.update_paras(model_obj_coe=Obj_Coef, model_valid_cut_pool=valid_cut_pool,
-                                  model_opt_trigger=trigger, model_gap=gap, generator=gen)
+                                  model_opt_trigger=trigger, model_gap=gap, generator=gen,
+                                  scale_phase=scale_phase, scale_stage=scale_stage,
+                                  size_signature=size_signature)
     current_time = datetime.datetime.now().strftime('%Y-%m-%d')
     # filename = str(current_time) + '_' + str(times) +'.xlsx'
     ml_train_set_gen.build_optimize()
@@ -160,11 +206,17 @@ while times <= 300:
     xl_opt_trigger = []
     xl_random_seed = []
     xl_gap = []
+    xl_scale_phase = []
+    xl_scale_stage = []
+    xl_size_signature = []
 
     xl_customer_num = []
     xl_service_num = []
     xl_product_num = []
     xl_team_num = []
+    xl_base_num_vars = []
+    xl_base_num_constrs = []
+    xl_root_num_constrs = []
 
     xl_service_time = []
     xl_service_price = []
@@ -258,11 +310,17 @@ while times <= 300:
         xl_opt_trigger.append(xl_target_data[i]["opt_trigger"])
         xl_random_seed.append(xl_target_data[i]["random_seed"])
         xl_gap.append(xl_target_data[i]["gap"])
+        xl_scale_phase.append(xl_target_data[i]["scale_phase"])
+        xl_scale_stage.append(xl_target_data[i]["scale_stage"])
+        xl_size_signature.append(xl_target_data[i]["size_signature"])
 
         xl_customer_num.append(xl_target_data[i]["customer_num"])
         xl_service_num.append(xl_target_data[i]["service_num"])
         xl_product_num.append(xl_target_data[i]["product_num"])
         xl_team_num.append(xl_target_data[i]["team_num"])
+        xl_base_num_vars.append(xl_target_data[i]["base_num_vars"])
+        xl_base_num_constrs.append(xl_target_data[i]["base_num_constrs"])
+        xl_root_num_constrs.append(xl_target_data[i]["root_num_constrs"])
 
         xl_service_time.append(xl_target_data[i]["service_time"])
         xl_service_price.append(xl_target_data[i]["service_price"])
@@ -356,11 +414,17 @@ while times <= 300:
         '求解选择': xl_opt_trigger,
         'random_seed': xl_random_seed,
         'gap': xl_gap,
+        'scale_phase': xl_scale_phase,
+        'scale_stage': xl_scale_stage,
+        'size_signature': xl_size_signature,
 
         '客户数': xl_customer_num,
         '服务数': xl_service_num,
         '产品数': xl_product_num,
         '服务团队数': xl_team_num,
+        'base_num_vars': xl_base_num_vars,
+        'base_num_constrs': xl_base_num_constrs,
+        'root_num_constrs': xl_root_num_constrs,
 
         '服务时间': xl_service_time,
         '服务价格': xl_service_price,
@@ -450,8 +514,9 @@ while times <= 300:
     current_time = datetime.datetime.now().strftime('%Y-%m-%d')
     filename =  'result.csv'
     df_target = pd.DataFrame(df_target_data)
-    df_target.to_csv('D:/桌面/' + filename, index=False,mode='a')
-    # path = 'D:/桌面/' + filename
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    df_target.to_csv(RESULT_CSV_PATH, index=False, mode='a')
+    # path = RESULT_CSV_PATH
     # # 使用openpyxl加载现有的Excel文件
     # book = load_workbook(path)
     # # 创建一个pandas Excel writer，使用openpyxl作为引擎
