@@ -375,7 +375,9 @@ class TrainSetGenerator(object):
                 'obj3': self.model.Model_Obj[2].getValue(),
                 'obj': self.model.model.ObjVal,
 
-                'runtime': self.model.time_final
+                'runtime': self.model.time_final,
+                'full_runtime': self.model.full_runtime,
+                'legacy_runtime': self.model.legacy_runtime,
             }
 
             self.xl_data.append(current_data)

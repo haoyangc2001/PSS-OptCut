@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-TARGET_COLUMN = "求解时间"
+TARGET_COLUMN = "full_runtime"
 BUNDLE_COLUMN = "有效不等式选择"
 GROUP_COLUMN = "instance_id"
 BASELINE_BUNDLE = "(0, 0, 0, 0, 0, 0)"
@@ -49,6 +49,8 @@ DEFAULT_DROP_COLUMNS = [
     "总任务开始时间和",
     "总利润",
     "函数目标值",
+    "求解时间",
+    "legacy_runtime",
     "库存",
     "库存梯度",
     "库存下界",
@@ -94,6 +96,7 @@ MANUAL_SPLIT_DROP_FEATURES = [
     "服务成本中位数",
     "转移时间矩阵峰度",
     "求解时间",
+    "legacy_runtime",
     "服务时间窗Early标准差",
     "客户效用众数",
 ]

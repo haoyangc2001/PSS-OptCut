@@ -29,6 +29,12 @@ def load_clean_result_csv(
     without_headers_df = raw_df.loc[~header_mask].copy()
     dedup_df = without_headers_df.drop_duplicates(keep="first").copy()
 
+    if TARGET_COLUMN not in dedup_df.columns:
+        raise KeyError(
+            f"Expected target column '{TARGET_COLUMN}' in {result_path}, "
+            "but it was not found. Please regenerate result.csv with the dual-runtime solver output."
+        )
+
     dedup_df[TARGET_COLUMN] = pd.to_numeric(dedup_df[TARGET_COLUMN], errors="coerce")
     dedup_df["random_seed"] = pd.to_numeric(dedup_df["random_seed"], errors="coerce")
     clean_numeric_df = dedup_df.dropna(subset=[TARGET_COLUMN, "random_seed"]).copy()

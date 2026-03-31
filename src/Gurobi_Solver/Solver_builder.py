@@ -30,6 +30,9 @@ class GRBModel(object):
         self.base_num_vars = 0
         self.base_num_constrs = 0
         self.root_num_constrs = 0
+        self.time_final = None
+        self.legacy_runtime = None
+        self.full_runtime = None
 
         # 决策变量
         self.R = {}
@@ -191,6 +194,124 @@ class GRBModel(object):
         self.base_num_constrs = self.model.NumConstrs
         self.root_num_constrs = self.base_num_constrs
 
+    def _add_static_cuts(self, trigger_bits):
+        if trigger_bits[0] == 1:
+            for i in range(self.generator.Num_Customer):
+                for j in range(self.generator.Num_Customer):
+                    for k in range(self.generator.Num_Team):
+                        constraint_expr = self.X[i, j, k] + self.X[j, i, k] <= 1
+                        constraint_name = f"cut_0_{i}_{j}_{k}"
+                        self.model.addConstr(constraint_expr, name=constraint_name)
+
+        if trigger_bits[1] == 1:
+            for i in range(self.generator.Num_Customer):
+                for j in range(self.generator.Num_Customer):
+                    for k in range(self.generator.Num_Team):
+                        expr = (
+                            self.T[i, k]
+                            + sum(
+                                self.R[i, m] * self.generator.Service_Time[m]
+                                for m in range(self.generator.Num_Service)
+                            )
+                            + self.generator.Transfer_Time[i][j]
+                            - self.BigM * (1 - self.X[i, j, k])
+                        )
+                        constr_name = f"cut_1_{i}_{j}_{k}"
+                        self.model.addConstr(expr <= self.generator.Late_Start_Limit[j], name=constr_name)
+
+        if trigger_bits[2] == 1:
+            for i in range(self.generator.Num_Customer):
+                for j in range(self.generator.Num_Customer):
+                    for k in range(self.generator.Num_Team):
+                        expr = (
+                            self.generator.Early_Start_Limit[i]
+                            + self.generator.Transfer_Time[i][j]
+                            + min(self.generator.Service_Time)
+                            - self.BigM * (1 - self.X[i, j, k])
+                        )
+                        constr_name = f"cut_2_{i}_{j}_{k}"
+                        self.model.addConstr(expr <= self.generator.Late_Start_Limit[j], name=constr_name)
+
+    def _remove_static_cuts(self, trigger_bits):
+        for i in range(self.generator.Num_Customer):
+            for j in range(self.generator.Num_Customer):
+                for k in range(self.generator.Num_Team):
+                    if trigger_bits[0] == 1:
+                        constraint_name_0 = f"cut_0_{i}_{j}_{k}"
+                        constraint_to_remove_0 = self.model.getConstrByName(constraint_name_0)
+                        if constraint_to_remove_0 is not None:
+                            self.model.remove(constraint_to_remove_0)
+
+                    if trigger_bits[1] == 1:
+                        constraint_name_1 = f"cut_1_{i}_{j}_{k}"
+                        constraint_to_remove_1 = self.model.getConstrByName(constraint_name_1)
+                        if constraint_to_remove_1 is not None:
+                            self.model.remove(constraint_to_remove_1)
+
+                    if trigger_bits[2] == 1:
+                        constraint_name_2 = f"cut_2_{i}_{j}_{k}"
+                        constraint_to_remove_2 = self.model.getConstrByName(constraint_name_2)
+                        if constraint_to_remove_2 is not None:
+                            self.model.remove(constraint_to_remove_2)
+
+    def _make_mipnode_callback(self, trigger_bits):
+        def callback(model, where):
+            if where != GRB.Callback.MIPNODE:
+                return
+
+            objbound = model.cbGet(GRB.Callback.MIPNODE_OBJBST)
+            objbnd = model.cbGet(GRB.Callback.MIPNODE_OBJBND)
+            denominator = max(abs(objbnd), 1e-9)
+            current_gap = round(abs(objbnd - objbound) / denominator, 2)
+
+            if current_gap <= 0.15 and self.flag == 0:
+                for i in range(self.generator.Num_Customer):
+                    for j in range(self.generator.Num_Customer):
+                        for k in range(self.generator.Num_Team):
+                            if trigger_bits[0] == 1:
+                                model.cbCut(self.X[i, j, k] + self.X[j, i, k] <= 1)
+                            if trigger_bits[1] == 1:
+                                expr = (
+                                    self.T[i, k]
+                                    + sum(
+                                        self.R[i, m] * self.generator.Service_Time[m]
+                                        for m in range(self.generator.Num_Service)
+                                    )
+                                    + self.generator.Transfer_Time[i][j]
+                                    - self.BigM * (1 - self.X[i, j, k])
+                                )
+                                model.cbCut(expr <= self.generator.Late_Start_Limit[j])
+                            if trigger_bits[2] == 1:
+                                expr = (
+                                    self.generator.Early_Start_Limit[i]
+                                    + self.generator.Transfer_Time[i][j]
+                                    + min(self.generator.Service_Time)
+                                    - self.BigM * (1 - self.X[i, j, k])
+                                )
+                                model.cbCut(expr <= self.generator.Late_Start_Limit[j])
+                self.flag = 1
+
+        return callback
+
+    def _compute_full_trigger4_runtime(self, trigger4):
+        full_model = GRBModel()
+        full_model.set_data(
+            obj_coe=self.obj_coe,
+            valid_cut_pool=self.valid_cut_pool,
+            generator=self.generator,
+            valid_selection=self.valid_selection,
+        )
+        full_model.model_builder()
+        full_model._add_static_cuts(trigger4[:3])
+        full_model.model.update()
+        full_model.root_num_constrs = full_model.model.NumConstrs
+        full_model.flag = 0
+        full_model.model.Params.NodeLimit = GRB.INFINITY
+        full_model.model.Params.PreCrush = 1
+        full_model.model.Params.OutputFlag = 0
+        full_model.model.optimize(full_model._make_mipnode_callback(trigger4[3:]))
+        return full_model.model.runtime
+
 
     def optimize_(self, trigger1,trigger2,trigger3,trigger4):
         """
@@ -198,87 +319,6 @@ class GRBModel(object):
         :param trigger:
         :return:
         """
-
-        def my_callback(model, where):
-            if where == GRB.Callback.MIPNODE :
-                # 获取当前节点的信息
-                node_count = model.cbGet(GRB.Callback.MIPNODE_NODCNT)
-                objbound = model.cbGet(GRB.Callback.MIPNODE_OBJBST)
-                objbnd= model.cbGet(GRB.Callback.MIPNODE_OBJBND)
-                cuent_gap=round(abs(objbnd-objbound)/objbnd,2)
-                # print(cuent_gap)
-                # 在这里添加 CB cut 的逻辑，示例中添加了一个简单的 cut
-                if cuent_gap<=0.15 and self.flag==0:
-                    for i in range(self.generator.Num_Customer):
-                        for j in range(self.generator.Num_Customer):
-                            for k in range(self.generator.Num_Team):
-                                # 添加 CB cut
-                                # cut_expr = model.getVarByName(f'x_{i}_{j}_{k}') + model.getVarByName(f'x_{j}_{i}_{k}')
-                                # model.cbCut(cut_expr<= 1)
-                                if trigger3[0]==1:
-                                    model.cbCut(self.X[i,j,k]+self.X[j,i,k]<=1)
-                                if trigger3[1]==1:
-                                    expr = self.T[i, k] + sum(
-                                                        self.R[i, m] * self.generator.Service_Time[m] for m in range(self.generator.Num_Service)
-                                                        )+self.generator.Transfer_Time[i][j] - self.BigM * (1 - self.X[i, j, k])
-                                    model.cbCut(expr <= self.generator.Late_Start_Limit[j])
-                                if trigger3[2]==1:
-                                    expr = self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][
-                                        j] + min(self.generator.Service_Time) - self.BigM * (1 - self.X[i, j, k])
-                                    model.cbCut(expr <= self.generator.Late_Start_Limit[j])
-
-                    # for i in range(self.generator.Num_Customer):
-                    #     for j in range(self.generator.Num_Customer):
-                    #         for k in range(self.generator.Num_Team):
-                    #             expr = self.T[i, k] + sum(
-                    #                     self.R[i, m] * self.generator.Service_Time[m] for m in range(self.generator.Num_Service)
-                    #                     )+self.generator.Transfer_Time[i][j] - self.BigM * (1 - self.X[i, j, k])
-                    #             # expr = model.getVarByName(f't_{i}_{k}') + quicksum(
-                    #             #     model.getVarByName(f'r_{i}_{m}') * self.generator.Service_Time[m] for m in
-                    #             #     range(self.generator.Num_Service)
-                    #             # ) + self.generator.Transfer_Time[i][j] - self.BigM * (1 - model.getVarByName(f'x_{i}_{j}_{k}'))
-                    #             model.cbCut(expr <= self.generator.Late_Start_Limit[j])
-                    #
-                    # for i in range(self.generator.Num_Customer):
-                    #     for j in range(self.generator.Num_Customer):
-                    #         for k in range(self.generator.Num_Team):
-                    #             # 构建约束表达式
-                    #             expr = self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][j] + min(
-                    #                     self.generator.Service_Time) - self.BigM * (1 - self.X[i, j, k])
-                    #             # expr = self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][j] + min(
-                    #             #     self.generator.Service_Time) - self.BigM * (1 - model.getVarByName(f'x_{i}_{j}_{k}'))
-                    #             model.cbCut( expr <= self.generator.Late_Start_Limit[j])
-                    self.flag=1
-        def my_callback_1(model, where):
-            if where == GRB.Callback.MIPNODE :
-                # 获取当前节点的信息
-                node_count = model.cbGet(GRB.Callback.MIPNODE_NODCNT)
-                objbound = model.cbGet(GRB.Callback.MIPNODE_OBJBST)
-                objbnd= model.cbGet(GRB.Callback.MIPNODE_OBJBND)
-                cuent_gap=round(abs(objbnd-objbound)/objbnd,2)
-                # print(cuent_gap)
-                # 在这里添加 CB cut 的逻辑，示例中添加了一个简单的 cut
-                if cuent_gap<=0.15 and self.flag==0:
-                    for i in range(self.generator.Num_Customer):
-                        for j in range(self.generator.Num_Customer):
-                            for k in range(self.generator.Num_Team):
-                                # 添加 CB cut
-                                # cut_expr = model.getVarByName(f'x_{i}_{j}_{k}') + model.getVarByName(f'x_{j}_{i}_{k}')
-                                # model.cbCut(cut_expr<= 1)
-                                if trigger4[3]==1:
-                                    model.cbCut(self.X[i,j,k]+self.X[j,i,k]<=1)
-                                if trigger4[4]==1:
-                                    expr = self.T[i, k] + sum(
-                                                        self.R[i, m] * self.generator.Service_Time[m] for m in range(self.generator.Num_Service)
-                                                        )+self.generator.Transfer_Time[i][j] - self.BigM * (1 - self.X[i, j, k])
-                                    model.cbCut(expr <= self.generator.Late_Start_Limit[j])
-                                if trigger4[5]==1:
-                                    expr = self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][
-                                        j] + min(self.generator.Service_Time) - self.BigM * (1 - self.X[i, j, k])
-                                    model.cbCut(expr <= self.generator.Late_Start_Limit[j])
-                    self.flag = 1
-
-
 
         # self.model.Params.Heuristics = 0  # 禁用所有启发式算法
         DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -406,7 +446,8 @@ class GRBModel(object):
 
         if trigger3!=[0,0,0]:
             self.model.Params.PreCrush = 1
-            self.model.optimize(my_callback)
+            self.flag = 0
+            self.model.optimize(self._make_mipnode_callback(trigger3))
             time1 = self.model.runtime
             print(f"trigger3={trigger3}",end=' ')
             print(time1)
@@ -420,73 +461,27 @@ class GRBModel(object):
             self.model.optimize()
             time1 = self.model.runtime
             self.model.reset()
-
-            if trigger4[0] == 1:
-                for i in range(self.generator.Num_Customer):
-                    for j in range(self.generator.Num_Customer):
-                        for k in range(self.generator.Num_Team):
-                            constraint_expr = self.X[i, j, k] + self.X[j, i, k] <= 1
-                            constraint_name = f"cut_0_{i}_{j}_{k}"
-                            self.model.addConstr(constraint_expr, name=constraint_name)
-
-            if trigger4[1] == 1:
-                for i in range(self.generator.Num_Customer):
-                    for j in range(self.generator.Num_Customer):
-                        for k in range(self.generator.Num_Team):
-                            # 构建约束表达式
-                            expr = self.T[i, k] + sum(
-                                self.R[i, m] * self.generator.Service_Time[m] for m in
-                                range(self.generator.Num_Service)) + \
-                                   self.generator.Transfer_Time[i][j] - self.BigM * (1 - self.X[i, j, k])
-                            # 构建约束名称，可以根据需要进行修改
-                            constr_name = f'cut_1_{i}_{j}_{k}'
-                            # 将约束添加到字典中
-                            self.model.addConstr(expr <= self.generator.Late_Start_Limit[j], name=constr_name)
-
-            if trigger4[2] == 1:
-                for i in range(self.generator.Num_Customer):
-                    for j in range(self.generator.Num_Customer):
-                        for k in range(self.generator.Num_Team):
-                            # 构建约束表达式
-                            expr = self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][j] + min(
-                                self.generator.Service_Time) - self.BigM * (1 - self.X[i, j, k])
-                            # 构建约束名称，可以根据需要进行修改
-                            constr_name = f'cut_2_{i}_{j}_{k}'
-                            # 将约束添加到字典中
-                            self.model.addConstr(expr <= self.generator.Late_Start_Limit[j], name=constr_name)
+            self._add_static_cuts(trigger4[:3])
             self.model.update()
             self.root_num_constrs = self.model.NumConstrs
             self.model.Params.NodeLimit = 1
             self.model.Params.OutputFlag = 0
             self.model.optimize()
             time2 = self.model.runtime
-
-            for i in range(self.generator.Num_Customer):
-                for j in range(self.generator.Num_Customer):
-                    for k in range(self.generator.Num_Team):
-                        if trigger4[0]==1:
-                            constraint_name_0 = f"cut_0_{i}_{j}_{k}"
-                            constraint_to_remove_0 = self.model.getConstrByName(constraint_name_0)
-                            self.model.remove(constraint_to_remove_0)
-
-                        if trigger4[1] == 1:
-                            constraint_name_1 = f"cut_1_{i}_{j}_{k}"
-                            constraint_to_remove_1 = self.model.getConstrByName(constraint_name_1)
-                            self.model.remove(constraint_to_remove_1)
-
-                        if trigger4[2] == 1:
-                            constraint_name_2 = f"cut_2_{i}_{j}_{k}"
-                            constraint_to_remove_2 = self.model.getConstrByName(constraint_name_2)
-                            self.model.remove(constraint_to_remove_2)
+            self._remove_static_cuts(trigger4[:3])
+            self.model.update()
 
             self.model.Params.NodeLimit = GRB.INFINITY
             self.model.Params.PreCrush = 1
             self.model.Params.OutputFlag = 0
-            self.model.optimize(my_callback_1)
+            self.flag = 0
+            self.model.optimize(self._make_mipnode_callback(trigger4[3:]))
             time3 = self.model.runtime
-            self.time_final=time2+time3-time1
+            self.legacy_runtime = time2 + time3 - time1
+            self.full_runtime = self._compute_full_trigger4_runtime(trigger4)
+            self.time_final = self.legacy_runtime
             print(f"trigger4={trigger4}",end=' ')
-            print(time2+time3-time1)
+            print(self.legacy_runtime)
             # with open(file_path, "a") as file:
             #     data_to_append = f"trigger4={trigger4}:{time2+time3-time1}"
             #     file.write(data_to_append + "\n")

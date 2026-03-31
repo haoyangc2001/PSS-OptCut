@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 
 import numpy as np
@@ -95,6 +96,8 @@ RESULT_COLUMN_MAP = [
     ("obj3", "总利润"),
     ("obj", "函数目标值"),
     ("runtime", "求解时间"),
+    ("full_runtime", "full_runtime"),
+    ("legacy_runtime", "legacy_runtime"),
 ]
 
 
@@ -185,9 +188,43 @@ def build_result_dataframe(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
+def ensure_result_csv_schema() -> None:
+    expected_columns = [column_name for _, column_name in RESULT_COLUMN_MAP]
+    if not RESULT_CSV_PATH.exists() or RESULT_CSV_PATH.stat().st_size == 0:
+        return
+
+    with RESULT_CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file:
+        rows = list(csv.reader(file))
+
+    if not rows:
+        return
+
+    current_header = rows[0]
+    if current_header == expected_columns:
+        return
+
+    old_columns = expected_columns[:-2]
+    if current_header != old_columns:
+        raise RuntimeError(
+            "Existing data/result.csv header does not match the expected schema. "
+            "Please inspect the file before appending new experiment rows."
+        )
+
+    runtime_idx = old_columns.index("求解时间")
+    migrated_rows = [expected_columns]
+    for row in rows[1:]:
+        legacy_runtime = row[runtime_idx] if len(row) > runtime_idx else ""
+        migrated_rows.append(row + ["", legacy_runtime])
+
+    with RESULT_CSV_PATH.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerows(migrated_rows)
+
+
 def run_experiment(*, total_times: int = TOTAL_TIMES) -> None:
     gen = Generator()
     valid_cut_pool = build_valid_cut_pool()
+    ensure_result_csv_schema()
 
     times = 1
     while times <= total_times:
