@@ -17,6 +17,8 @@ class TrainSetGenerator(object):
         self.model_condition = None
         self.model_opt_trigger = 0
         self.model_gap = 0
+        self.instance_id = None
+        self.row_id_start = 1
         self.scale_phase = None
         self.scale_stage = None
         self.size_signature = None
@@ -126,13 +128,15 @@ class TrainSetGenerator(object):
         self.xl_obj = []  # 函数目标值
 
         self.xl_runtime = []
+        self.xl_full_runtime = []
+        self.xl_legacy_runtime = []
         self.xl_base_num_vars = []
         self.xl_base_num_constrs = []
         self.xl_root_num_constrs = []
 
     def update_paras(self, model_obj_coe, model_valid_cut_pool, model_opt_trigger,
-                     model_gap, generator, scale_phase=None, scale_stage=None,
-                     size_signature=None):
+                     model_gap, generator, instance_id=None, row_id_start=1,
+                     scale_phase=None, scale_stage=None, size_signature=None):
         """
         导入更新的模型参数
         :param model_obj_coe: ，目标函数的系数
@@ -146,6 +150,8 @@ class TrainSetGenerator(object):
         self.model_valid_cut_pool = model_valid_cut_pool
         self.model_opt_trigger = model_opt_trigger
         self.model_gap = model_gap
+        self.instance_id = instance_id
+        self.row_id_start = row_id_start
         self.scale_phase = scale_phase
         self.scale_stage = scale_stage
         self.size_signature = size_signature
@@ -168,7 +174,8 @@ class TrainSetGenerator(object):
         :param valid_cut_selection:
         :return:
         """
-        if len(valid_cut_selection) != len(self.model_valid_cut_pool):
+        expected_selection_len = 2 * len(self.model_valid_cut_pool)
+        if len(valid_cut_selection) != expected_selection_len:
             print('有效不等式个数不匹配')
             # exit()
 
@@ -187,8 +194,7 @@ class TrainSetGenerator(object):
         :param valid_cut_pool:
         :return:
         """
-        # self.valid_cut_selection_permutation = list(it.product(range(2), repeat=len(valid_cut_pool)))
-        self.valid_cut_selection_permutation = list(it.product(range(2), repeat=6))
+        self.valid_cut_selection_permutation = list(it.product(range(2), repeat=2 * len(valid_cut_pool)))
 
 
     def build_optimize(self):
@@ -200,6 +206,10 @@ class TrainSetGenerator(object):
 
         # generate valid cut permutation
         self.generate_selection_permutation(valid_cut_pool=self.model_valid_cut_pool)
+        print(
+            f"Instance {self.instance_id} | {self.scale_phase} | {self.scale_stage} | "
+            f"{self.size_signature} | seed={self.generator.random_seed}"
+        )
         # valid_selection=(0,0,0)
         # self.model = GRBModel()
         # self.model.set_data(obj_coe=self.model_obj_coe, valid_cut_pool=self.model_valid_cut_pool,
@@ -272,15 +282,15 @@ class TrainSetGenerator(object):
                         if i != j:
                             cut3_cons_num += 1
 
-                            # 注意 depot 0
-                            if self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i + 1][
-                                j + 1] + np.min(self.generator.Service_Time) > self.generator.Late_Start_Limit[j]:
+                            if self.generator.Early_Start_Limit[i] + self.generator.Transfer_Time[i][
+                                j] + np.min(self.generator.Service_Time) > self.generator.Late_Start_Limit[j]:
                                 cut3_num += 1
             current_xl_cut3_percent = cut3_num / cut3_cons_num
 
             # 记录当此求解数据
+            current_row_id = self.row_id_start + cnt
             current_data = {
-                'id': cnt,
+                'id': current_row_id,
                 'valid_selection': valid_selection,
                 "opt_trigger": self.model_opt_trigger,
                 'random_seed': self.generator.random_seed,
@@ -324,9 +334,9 @@ class TrainSetGenerator(object):
                 'inventory_step': self.generator.inventory_step,
 
                 'Ser_Pro_corr': self.generator.Ser_Pro_Corr,
-                'Ser_Pro_coe': self.generator.ser_pro_coe,
+                'Ser_Pro_coe': self.generator.Ser_Pro_Corr.reshape(-1),
                 'ser_pro_coe_lb': self.generator.ser_pro_coe_lb,
-                'ser_pro_coe_ub': self.generator.ser_pro_coe_lb,
+                'ser_pro_coe_ub': self.generator.ser_pro_coe_ub,
                 'Ser_Pro_coe_mean': np.mean(self.generator.Ser_Pro_Corr),
                 'Ser_Pro_coe_std': np.std(self.generator.Ser_Pro_Corr),
                 'Ser_Pro_coe_high4': np.quantile(self.generator.Ser_Pro_Corr, 0.75),
@@ -379,6 +389,11 @@ class TrainSetGenerator(object):
                 'full_runtime': self.model.full_runtime,
                 'legacy_runtime': self.model.legacy_runtime,
             }
+
+            print(
+                f"{current_row_id} | {self.instance_id} | {valid_selection} | "
+                f"{self.model.legacy_runtime:.6f} | {self.model.full_runtime:.6f}"
+            )
 
             self.xl_data.append(current_data)
             cnt += 1
@@ -492,6 +507,8 @@ class TrainSetGenerator(object):
             self.xl_obj.append(data[i]["obj"])  # 函数目标值
 
             self.xl_runtime.append(data[i]["runtime"])
+            self.xl_full_runtime.append(data[i]["full_runtime"])
+            self.xl_legacy_runtime.append(data[i]["legacy_runtime"])
 
         df_data = {
             '序号': self.xl_id,
@@ -595,16 +612,10 @@ class TrainSetGenerator(object):
             '总利润': self.xl_obj3,
             '函数目标值': self.xl_obj,
 
-            '求解时间': self.xl_runtime
+            '求解时间': self.xl_runtime,
+            'full_runtime': self.xl_full_runtime,
+            'legacy_runtime': self.xl_legacy_runtime,
         }
         df = pd.DataFrame(df_data)
-        # df.to_excel(filename, index=False)
-        df.sort_values(by="求解时间", inplace=True, ascending=True)
-        # index_ = df.iloc[0][0]
-
-        # df.iloc[0, 54] = 1
-        # self.xl_data[df.iloc[0, 0]]['target'] = 1
         print()
-        # _index = df.iloc[0][0]    # 提取排序后的最优行
-
         return df

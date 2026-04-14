@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -10,7 +11,13 @@ from .constants import EXPECTED_BUNDLE_COUNT, GROUP_COLUMN, INSTANCE_KEY_COLUMNS
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
+LOG_DIR = PROJECT_ROOT / "log"
 DEFAULT_RESULT_CSV = DATA_DIR / "result.csv"
+
+
+def default_log_run_dir(run_date: date | None = None) -> Path:
+    current_date = run_date or date.today()
+    return LOG_DIR / f"{current_date:%y%m%d}"
 
 
 def load_clean_result_csv(

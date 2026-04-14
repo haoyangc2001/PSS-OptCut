@@ -25,6 +25,7 @@ class GRBModel(object):
 
         self.generator = None
 
+        self.env = None
         self.model = None
         self.Model_Obj = {}
         self.base_num_vars = 0
@@ -63,7 +64,10 @@ class GRBModel(object):
         创建 Gurobi 模型
         :return:
         """
-        self.model = Model()
+        self.env = Env(empty=True)
+        self.env.setParam("OutputFlag", 0)
+        self.env.start()
+        self.model = Model(env=self.env)
 
         # 添加决策变量
         self.flag=0
@@ -480,8 +484,6 @@ class GRBModel(object):
             self.legacy_runtime = time2 + time3 - time1
             self.full_runtime = self._compute_full_trigger4_runtime(trigger4)
             self.time_final = self.legacy_runtime
-            print(f"trigger4={trigger4}",end=' ')
-            print(self.legacy_runtime)
             # with open(file_path, "a") as file:
             #     data_to_append = f"trigger4={trigger4}:{time2+time3-time1}"
             #     file.write(data_to_append + "\n")

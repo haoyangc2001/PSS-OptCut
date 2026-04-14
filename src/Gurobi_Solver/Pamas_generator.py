@@ -221,10 +221,14 @@ class Generator(object):
             start_index = end_index
         self.Transfer_Time = semi_matrix + semi_matrix.T
 
-        # depot_0 与 depot_n 的距离应该是相等的
+        # Keep the two depot rows/cols identical, then reorder the matrix so that
+        # customer indices are 0..Num_Customer-1 and depots are Num_Customer/Num_Customer+1.
         self.Transfer_Time[-1] = self.Transfer_Time[0]
         for row in range(len(self.Transfer_Time)):
             self.Transfer_Time[row][-1] = self.Transfer_Time[row][0]
+
+        reorder = list(range(1, self.Num_Customer + 1)) + [0, self.Num_Customer + 1]
+        self.Transfer_Time = self.Transfer_Time[np.ix_(reorder, reorder)]
 
         return self.Transfer_Time
 
@@ -249,9 +253,10 @@ class Generator(object):
         生成服务与消耗商品的对应关系
         :return:
         """
-        self.Ser_Pro_Corr=[]
+        self.Ser_Pro_Corr = []
         for i in range(self.Num_Service):
             self.ser_pro_coe = np.random.randint(low=self.ser_pro_coe_lb,
                                                  high=self.ser_pro_coe_ub,
                                                  size=self.Num_Product)
             self.Ser_Pro_Corr.append(self.ser_pro_coe)
+        self.Ser_Pro_Corr = np.asarray(self.Ser_Pro_Corr, dtype="int32")

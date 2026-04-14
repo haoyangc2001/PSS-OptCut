@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import csv
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -11,7 +11,6 @@ from .sample_generator import TrainSetGenerator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
-RESULT_CSV_PATH = DATA_DIR / "result.csv"
 
 OBJ_COEF = [1, -1, 1, 0]
 TOTAL_TIMES = 400
@@ -19,19 +18,22 @@ TOTAL_TIMES = 400
 RESULT_COLUMN_MAP = [
     ("id", "序号"),
     ("valid_selection", "有效不等式选择"),
-    ("opt_trigger", "求解选择"),
-    ("random_seed", "random_seed"),
-    ("gap", "gap"),
-    ("scale_phase", "scale_phase"),
-    ("scale_stage", "scale_stage"),
     ("size_signature", "size_signature"),
+    ("base_num_vars", "base_num_vars"),
+    ("base_num_constrs", "base_num_constrs"),
+    ("full_runtime", "full_runtime"),
+    ("root_num_constrs", "root_num_constrs"),
+    ("runtime", "求解时间"),
+    ("legacy_runtime", "legacy_runtime"),
     ("customer_num", "客户数"),
     ("service_num", "服务数"),
     ("product_num", "产品数"),
     ("team_num", "服务团队数"),
-    ("base_num_vars", "base_num_vars"),
-    ("base_num_constrs", "base_num_constrs"),
-    ("root_num_constrs", "root_num_constrs"),
+    ("scale_phase", "scale_phase"),
+    ("scale_stage", "scale_stage"),
+    ("opt_trigger", "求解选择"),
+    ("random_seed", "random_seed"),
+    ("gap", "gap"),
     ("service_time", "服务时间"),
     ("service_price", "服务价格"),
     ("service_cost", "服务成本"),
@@ -95,9 +97,6 @@ RESULT_COLUMN_MAP = [
     ("obj2", "总任务开始时间和"),
     ("obj3", "总利润"),
     ("obj", "函数目标值"),
-    ("runtime", "求解时间"),
-    ("full_runtime", "full_runtime"),
-    ("legacy_runtime", "legacy_runtime"),
 ]
 
 
@@ -179,7 +178,6 @@ def generate_random_parameter_ranges() -> dict[str, int]:
         "ser_pro_coe": np.random.randint(1, 20),
         "ser_pro_coe_lb": np.random.randint(1, 2),
         "ser_pro_coe_ub": np.random.randint(2, 4),
-        "duration": np.random.randint(8, 30),
     }
 
 
@@ -188,43 +186,23 @@ def build_result_dataframe(rows: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-def ensure_result_csv_schema() -> None:
-    expected_columns = [column_name for _, column_name in RESULT_COLUMN_MAP]
-    if not RESULT_CSV_PATH.exists() or RESULT_CSV_PATH.stat().st_size == 0:
-        return
-
-    with RESULT_CSV_PATH.open("r", encoding="utf-8-sig", newline="") as file:
-        rows = list(csv.reader(file))
-
-    if not rows:
-        return
-
-    current_header = rows[0]
-    if current_header == expected_columns:
-        return
-
-    old_columns = expected_columns[:-2]
-    if current_header != old_columns:
-        raise RuntimeError(
-            "Existing data/result.csv header does not match the expected schema. "
-            "Please inspect the file before appending new experiment rows."
-        )
-
-    runtime_idx = old_columns.index("求解时间")
-    migrated_rows = [expected_columns]
-    for row in rows[1:]:
-        legacy_runtime = row[runtime_idx] if len(row) > runtime_idx else ""
-        migrated_rows.append(row + ["", legacy_runtime])
-
-    with RESULT_CSV_PATH.open("w", encoding="utf-8-sig", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerows(migrated_rows)
+def build_result_csv_path(run_date: date | None = None) -> Path:
+    current_date = run_date or date.today()
+    return DATA_DIR / f"result_{current_date:%Y%m%d}.csv"
 
 
 def run_experiment(*, total_times: int = TOTAL_TIMES) -> None:
     gen = Generator()
     valid_cut_pool = build_valid_cut_pool()
-    ensure_result_csv_schema()
+    result_csv_path = build_result_csv_path()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    next_row_id = 1
+
+    # Each run starts from a fresh dated result file instead of appending to prior results.
+    if result_csv_path.exists():
+        result_csv_path.unlink()
+
+    print(f"Results will be written to: {result_csv_path}")
 
     times = 1
     while times <= total_times:
@@ -265,22 +243,18 @@ def run_experiment(*, total_times: int = TOTAL_TIMES) -> None:
             model_opt_trigger=1,
             model_gap=0,
             generator=gen,
+            instance_id=times,
+            row_id_start=next_row_id,
             scale_phase=scale_phase,
             scale_stage=scale_stage,
             size_signature=size_signature,
         )
         train_set_generator.build_optimize()
-        current_df = train_set_generator.pd_to_excel(data=train_set_generator.xl_data)
-
-        ordered_rows = []
-        for idx in range(len(train_set_generator.valid_cut_selection_permutation)):
-            row_id = int(current_df.iloc[idx, 0])
-            ordered_rows.append(train_set_generator.xl_data[row_id])
-
-        result_df = build_result_dataframe(ordered_rows)
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        write_header = (not RESULT_CSV_PATH.exists()) or RESULT_CSV_PATH.stat().st_size == 0
-        result_df.to_csv(RESULT_CSV_PATH, index=False, mode="a", header=write_header)
+        result_df = build_result_dataframe(train_set_generator.xl_data)
+        next_row_id += len(train_set_generator.xl_data)
+        write_mode = "w" if times == 1 else "a"
+        write_header = times == 1
+        result_df.to_csv(result_csv_path, index=False, mode=write_mode, header=write_header)
 
         print(f"-----------------------------------------------times = {times}")
         times += 1
